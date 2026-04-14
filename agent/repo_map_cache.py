@@ -6,10 +6,12 @@ from pathlib import Path
 
 from hermes_constants import get_hermes_dir
 
+_REPO_MAP_CACHE_VERSION = "v2"
+
 
 def compute_repo_map_cache_key(repo_root: Path | str, fingerprint: str) -> str:
     root = str(Path(repo_root).expanduser().resolve())
-    seed = f"{root}|{fingerprint}".encode("utf-8", errors="replace")
+    seed = f"{_REPO_MAP_CACHE_VERSION}|{root}|{fingerprint}".encode("utf-8", errors="replace")
     return hashlib.sha256(seed).hexdigest()[:24]
 
 

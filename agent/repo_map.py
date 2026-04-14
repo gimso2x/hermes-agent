@@ -45,6 +45,18 @@ _STOPWORDS = {
     "file", "about", "from", "into", "this", "that", "repo", "repository",
 }
 
+_DIR_PRIORITY = [
+    "agent",
+    "tools",
+    "gateway",
+    "tests",
+    "hermes_cli",
+    "cron",
+    "acp_adapter",
+    ".github",
+    ".plans",
+]
+
 
 def _iter_files(root: Path, *, max_files: int) -> list[Path]:
     files: list[Path] = []
@@ -94,6 +106,14 @@ def _collect_representative_files(root: Path, files: list[Path], *, limit: int =
             if len(chosen) >= limit:
                 return chosen
 
+    priority_prefixes = tuple(prefix + "/" for prefix in _DIR_PRIORITY)
+    for rel in rels:
+        if rel.startswith(priority_prefixes) and rel not in seen:
+            chosen.append(rel)
+            seen.add(rel)
+            if len(chosen) >= limit:
+                return chosen
+
     for rel in rels:
         if rel not in seen:
             chosen.append(rel)
@@ -107,12 +127,23 @@ def _collect_representative_files(root: Path, files: list[Path], *, limit: int =
 def build_repo_map(repo_root: Path | str, *, max_files: int = 400) -> dict:
     root = Path(repo_root).expanduser().resolve()
     files = _iter_files(root, max_files=max_files)
-    top_directories = sorted({p.relative_to(root).parts[0] for p in files if len(p.relative_to(root).parts) > 1})
+    top_directory_counts = Counter(
+        p.relative_to(root).parts[0] for p in files if len(p.relative_to(root).parts) > 1
+    )
+    ordered_top_directories = sorted(
+        top_directory_counts,
+        key=lambda name: (
+            0 if name in _DIR_PRIORITY else 1,
+            _DIR_PRIORITY.index(name) if name in _DIR_PRIORITY else 999,
+            -top_directory_counts[name],
+            name,
+        ),
+    )
     representative_files = _collect_representative_files(root, files)
     rel_files = [_rel(path, root) for path in files]
     return {
         "repo_root": str(root),
-        "top_directories": top_directories,
+        "top_directories": ordered_top_directories,
         "representative_files": representative_files,
         "all_files": rel_files,
         "suffix_counts": _suffix_counts(files),
@@ -165,7 +196,7 @@ def _normalize_terms(question: str) -> list[str]:
 
 def extract_focused_submap(repo_map: dict, question: str, *, limit: int = 8) -> dict:
     terms = _normalize_terms(question)
-    files = repo_map.get("representative_files", [])
+    files = repo_map.get("all_files") or repo_map.get("representative_files", [])
     dirs = repo_map.get("top_directories", [])
 
     def score_path(path: str) -> tuple[int, str]:
@@ -173,16 +204,23 @@ def extract_focused_submap(repo_map: dict, question: str, *, limit: int = 8) -> 
         score = 0
         for term in terms:
             if term in lower:
-                score += 3
+                score += 4
             if lower.endswith(term + ".py") or f"/{term}." in lower:
-                score += 2
+                score += 3
+            if f"/{term}/" in lower:
+                score += 3
+        if lower.startswith("gateway/platforms/") and any(term in {"gateway", "adapter", "adapters", "platform", "platforms"} for term in terms):
+            score += 6
+        if lower.startswith("tests/"):
+            score -= 1
         return (score, path)
 
-    matched_files = [path for score, path in sorted((score_path(path) for path in files), reverse=True) if score > 0][:limit]
+    scored = sorted((score_path(path) for path in files), reverse=True)
+    matched_files = [path for score, path in scored if score > 0][:limit]
     matched_directories = [name for name in dirs if any(term in name.lower() for term in terms)][:limit]
 
     if not matched_files:
-        matched_files = files[: min(limit, len(files))]
+        matched_files = (repo_map.get("representative_files", []) or files)[: min(limit, len(files))]
 
     return {
         "question": question,
