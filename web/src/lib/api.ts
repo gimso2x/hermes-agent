@@ -1,17 +1,12 @@
-const BASE = "";
+import { requestJSON } from "@/shared/http/client";
 
 // Ephemeral session token for protected endpoints (reveal).
 // Fetched once on first reveal request and cached in memory.
 let _sessionToken: string | null = null;
 
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, init);
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${text}`);
-  }
-  return res.json();
-}
+const fetchJSON = <T>(url: string, init?: RequestInit): Promise<T> => {
+  return requestJSON<T>(url, init);
+};
 
 async function getSessionToken(): Promise<string> {
   if (_sessionToken) return _sessionToken;
