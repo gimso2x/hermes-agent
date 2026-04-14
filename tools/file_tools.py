@@ -10,6 +10,7 @@ from pathlib import Path
 from tools.binary_extensions import has_binary_extension
 from tools.file_operations import ShellFileOperations
 from agent.redact import redact_sensitive_text
+from agent.repo_map import get_or_build_repo_map as _get_or_build_repo_map, render_repo_map_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,37 @@ _file_ops_cache: dict = {}
 #                      by the same task don't trigger false warnings.
 _read_tracker_lock = threading.Lock()
 _read_tracker: dict = {}
+
+
+def _maybe_append_repo_map_hint(result_json: str, *, path: str, task_id: str) -> str:
+    """Append one repo-map hint per task/root when broad project exploration starts."""
+    if str(path).strip() in {"", ".", "./"}:
+        return result_json
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except (OSError, ValueError):
+        return result_json
+
+    candidate_root = resolved if resolved.suffix == "" else resolved.parent
+    if resolved.suffix and resolved.name not in {"README.md", "AGENTS.md", "CLAUDE.md", "pyproject.toml", "package.json", "requirements.txt"}:
+        return result_json
+    root_key = str(candidate_root)
+    with _read_tracker_lock:
+        task_data = _read_tracker.setdefault(task_id, {"last_key": None, "consecutive": 0, "read_history": set(), "dedup": {}})
+        shown = task_data.setdefault("repo_map_hints", set())
+        if root_key in shown:
+            return result_json
+
+    try:
+        repo_map = _get_or_build_repo_map(candidate_root)
+        hint = f"\n\n[Repo map available: {root_key}]\n{render_repo_map_markdown(repo_map)}"
+    except Exception:
+        return result_json
+
+    with _read_tracker_lock:
+        task_data = _read_tracker.setdefault(task_id, {"last_key": None, "consecutive": 0, "read_history": set(), "dedup": {}})
+        task_data.setdefault("repo_map_hints", set()).add(root_key)
+    return result_json + hint
 
 
 def _get_file_ops(task_id: str = "default") -> ShellFileOperations:
@@ -444,7 +476,11 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                 "If you are stuck in a loop, stop reading and proceed with writing or responding."
             )
 
-        return json.dumps(result_dict, ensure_ascii=False)
+        return _maybe_append_repo_map_hint(
+            json.dumps(result_dict, ensure_ascii=False),
+            path=path,
+            task_id=task_id,
+        )
     except Exception as e:
         return tool_error(str(e))
 
@@ -677,6 +713,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
             )
 
         result_json = json.dumps(result_dict, ensure_ascii=False)
+        result_json = _maybe_append_repo_map_hint(result_json, path=path, task_id=task_id)
         # Hint when results were truncated — explicit next offset is clearer
         # than relying on the model to infer it from total_count vs match count.
         if result_dict.get("truncated"):

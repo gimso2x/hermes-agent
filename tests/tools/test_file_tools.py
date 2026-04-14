@@ -293,4 +293,57 @@ class TestSearchHints:
         assert "offset=100" in raw
 
 
+class TestRepoMapHints:
+    def setup_method(self):
+        from tools.file_tools import _read_tracker
+        _read_tracker.clear()
+
+    @patch("tools.file_tools._get_file_ops")
+    @patch("tools.file_tools._get_or_build_repo_map")
+    def test_read_file_appends_repo_map_hint_for_project_root(self, mock_repo_map, mock_get):
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.content = "1|hello"
+        result_obj.to_dict.return_value = {"content": "1|hello", "total_lines": 1, "file_size": 100}
+        mock_ops.read_file.return_value = result_obj
+        mock_get.return_value = mock_ops
+        mock_repo_map.return_value = {
+            "repo_root": "/repo",
+            "top_directories": ["agent", "tools", "tests"],
+            "representative_files": ["README.md", "agent/main.py", "tests/test_main.py"],
+            "suffix_counts": {".py": 3},
+            "file_count": 3,
+        }
+
+        from tools.file_tools import read_file_tool
+        raw = read_file_tool("/repo/README.md", task_id="repo-map-read")
+
+        assert "[Repo map available:" in raw
+        assert "리포 지도" in raw
+        assert "agent/main.py" in raw
+
+    @patch("tools.file_tools._get_file_ops")
+    @patch("tools.file_tools._get_or_build_repo_map")
+    def test_search_appends_repo_map_hint_once_per_task(self, mock_repo_map, mock_get):
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.to_dict.return_value = {"matches": [{"path": "agent/main.py", "line": 1, "content": "x"}]}
+        mock_ops.search.return_value = result_obj
+        mock_get.return_value = mock_ops
+        mock_repo_map.return_value = {
+            "repo_root": "/repo",
+            "top_directories": ["agent", "gateway"],
+            "representative_files": ["README.md", "gateway/run.py"],
+            "suffix_counts": {".py": 2},
+            "file_count": 2,
+        }
+
+        from tools.file_tools import search_tool
+        raw1 = search_tool(pattern="gateway", path="/repo", task_id="repo-map-search")
+        raw2 = search_tool(pattern="gateway", path="/repo", offset=1, task_id="repo-map-search")
+
+        assert "[Repo map available:" in raw1
+        assert "[Repo map available:" not in raw2
+
+
 
