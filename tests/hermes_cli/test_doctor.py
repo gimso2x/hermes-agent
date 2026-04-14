@@ -31,6 +31,44 @@ class TestDoctorPlatformHints:
         assert doctor._system_package_install_cmd("ripgrep") == "sudo apt install ripgrep"
 
 
+def test_run_doctor_includes_runtime_contract_and_security_boundaries(monkeypatch, tmp_path):
+    home = tmp_path / ".hermes"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.yaml").write_text("memory:\n  provider: holographic\nmodel:\n  default: gpt-5.4\nterminal:\n  backend: local\n")
+
+    monkeypatch.setattr(doctor_mod, "HERMES_HOME", home)
+    monkeypatch.setattr(doctor_mod, "PROJECT_ROOT", tmp_path / "project")
+    monkeypatch.setattr(doctor_mod, "_DHH", str(home))
+    (tmp_path / "project").mkdir(exist_ok=True)
+
+    fake_model_tools = types.SimpleNamespace(
+        check_tool_availability=lambda *a, **kw: ([], []),
+        TOOLSET_REQUIREMENTS={},
+    )
+    monkeypatch.setitem(sys.modules, "model_tools", fake_model_tools)
+
+    try:
+        from hermes_cli import auth as _auth_mod
+        monkeypatch.setattr(_auth_mod, "get_nous_auth_status", lambda: {})
+        monkeypatch.setattr(_auth_mod, "get_codex_auth_status", lambda: {})
+    except Exception:
+        pass
+
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        doctor_mod.run_doctor(Namespace(fix=False))
+    out = buf.getvalue()
+
+    assert "Runtime Contract" in out
+    assert "모델/프로바이더:" in out
+    assert "터미널 백엔드:" in out
+    assert "메모리 모드:" in out
+    assert "Security Boundaries" in out
+    assert "dangerous command approval" in out.lower()
+    assert "git reset --hard" in out
+
+
 class TestProviderEnvDetection:
     def test_detects_openai_api_key(self):
         content = "OPENAI_BASE_URL=http://localhost:1234/v1\nOPENAI_API_KEY=***"

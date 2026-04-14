@@ -18,6 +18,11 @@ from hermes_cli.models import provider_label
 from hermes_cli.nous_subscription import get_nous_subscription_features
 from hermes_cli.runtime_provider import resolve_requested_provider
 from hermes_constants import OPENROUTER_MODELS_URL
+from hermes_cli.runtime_surfaces import (
+    summarize_autonomous_execution,
+    summarize_runtime_contract,
+    summarize_security_boundaries,
+)
 from tools.tool_backend_helpers import managed_nous_tools_enabled
 
 def check_mark(ok: bool) -> str:
@@ -110,6 +115,25 @@ def show_status(args):
 
     print(f"  Model:        {_configured_model_label(config)}")
     print(f"  Provider:     {_effective_provider_label()}")
+
+    print()
+    print(color("◆ Runtime Contract", Colors.CYAN, Colors.BOLD))
+    memory_cfg = config.get("memory") if isinstance(config, dict) else {}
+    memory_mode = "built-in"
+    if isinstance(memory_cfg, dict):
+        memory_mode = memory_cfg.get("provider") or "built-in"
+    for line in summarize_runtime_contract(
+        provider_label=_effective_provider_label(),
+        terminal_backend=(config.get("terminal", {}) or {}).get("backend", os.getenv("TERMINAL_ENV", "local")) if isinstance(config, dict) else os.getenv("TERMINAL_ENV", "local"),
+        memory_mode=memory_mode,
+        model_name=_configured_model_label(config),
+    ):
+        print(f"  {line}")
+
+    print()
+    print(color("◆ Security Boundaries", Colors.CYAN, Colors.BOLD))
+    for line in summarize_security_boundaries():
+        print(f"  {line}")
     
     # =========================================================================
     # API Keys
@@ -414,6 +438,14 @@ def show_status(args):
     else:
         print("  Jobs:         0")
     
+    # =========================================================================
+    # Autonomous Execution
+    # =========================================================================
+    print()
+    print(color("◆ Autonomous Execution", Colors.CYAN, Colors.BOLD))
+    for line in summarize_autonomous_execution(hermes_home=get_hermes_home()):
+        print(f"  {line}")
+
     # =========================================================================
     # Sessions
     # =========================================================================

@@ -29,6 +29,7 @@ load_dotenv(PROJECT_ROOT / ".env", override=False, encoding="utf-8")
 
 from hermes_cli.colors import Colors, color
 from hermes_constants import OPENROUTER_MODELS_URL
+from hermes_cli.runtime_surfaces import summarize_runtime_contract, summarize_security_boundaries
 
 
 _PROVIDER_ENV_HINTS = (
@@ -176,6 +177,40 @@ def run_doctor(args):
     print(color("│                 🩺 Hermes Doctor                        │", Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
     
+    print()
+    print(color("◆ Runtime Contract", Colors.CYAN, Colors.BOLD))
+    try:
+        from hermes_cli.config import load_config
+        contract_config = load_config() or {}
+    except Exception:
+        contract_config = {}
+    memory_cfg = contract_config.get("memory") if isinstance(contract_config, dict) else {}
+    memory_mode = memory_cfg.get("provider") if isinstance(memory_cfg, dict) and memory_cfg.get("provider") else "built-in"
+    terminal_cfg = contract_config.get("terminal") if isinstance(contract_config, dict) else {}
+    terminal_backend = terminal_cfg.get("backend") if isinstance(terminal_cfg, dict) else os.getenv("TERMINAL_ENV", "local")
+    model_cfg = contract_config.get("model") if isinstance(contract_config, dict) else {}
+    if isinstance(model_cfg, dict):
+        model_name = model_cfg.get("default") or model_cfg.get("name") or "(not set)"
+        provider_name = model_cfg.get("provider") or "(not set)"
+    elif isinstance(model_cfg, str):
+        model_name = model_cfg
+        provider_name = "(not set)"
+    else:
+        model_name = "(not set)"
+        provider_name = "(not set)"
+    for line in summarize_runtime_contract(
+        provider_label=provider_name,
+        terminal_backend=terminal_backend or os.getenv("TERMINAL_ENV", "local"),
+        memory_mode=memory_mode,
+        model_name=model_name,
+    ):
+        check_info(line)
+
+    print()
+    print(color("◆ Security Boundaries", Colors.CYAN, Colors.BOLD))
+    for line in summarize_security_boundaries():
+        check_info(line)
+
     # =========================================================================
     # Check: Python version
     # =========================================================================

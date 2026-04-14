@@ -140,6 +140,16 @@ class ProcessRegistry:
         # via wait/poll/log.  Drain loops skip notifications for these.
         self._completion_consumed: set = set()
 
+    def get_state_snapshot(self) -> Dict[str, int]:
+        """Return a tiny public snapshot for user-facing status surfaces."""
+        with self._lock:
+            sessions = list(self._running.values()) + list(self._finished.values())
+            return {
+                "running": len(self._running),
+                "finished_recent": len(self._finished),
+                "watch_disabled": sum(1 for s in sessions if getattr(s, "_watch_disabled", False)),
+            }
+
     @staticmethod
     def _clean_shell_noise(text: str) -> str:
         """Strip shell startup warnings from the beginning of output."""

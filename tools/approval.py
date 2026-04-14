@@ -156,6 +156,20 @@ def _approval_key_aliases(pattern_key: str) -> set[str]:
     return _PATTERN_KEY_ALIASES.get(pattern_key, {pattern_key})
 
 
+def approval_policy_summary() -> dict[str, object]:
+    """Return a small human-readable snapshot of the approval policy."""
+    return {
+        "dangerous_pattern_count": len(DANGEROUS_PATTERNS),
+        "examples": [
+            "recursive delete",
+            "git reset --hard",
+            "force push",
+            "write into /etc/",
+        ],
+        "session_scoped": True,
+    }
+
+
 # =========================================================================
 # Detection
 # =========================================================================
