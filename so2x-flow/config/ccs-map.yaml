@@ -1,0 +1,70 @@
+runtime:
+  runner: auto
+  claude_command: claude
+  claude_headless_flag: -p
+roles:
+  planner:
+    ccs_profile: codex
+    claude_role: planner
+    ccs:
+      command: ccs
+      engine: codex
+      model: codex
+      extra_args: []
+    claude:
+      command: claude
+      extra_args: []
+  implementer:
+    ccs_profile: glm
+    claude_role: implementer
+    ccs:
+      command: ccs
+      engine: glm
+      model: glm
+      extra_args: []
+    claude:
+      command: claude
+      extra_args: []
+  qa_planner:
+    ccs_profile: codex
+    claude_role: qa-planner
+    ccs:
+      command: ccs
+      engine: codex
+      model: codex
+      extra_args: []
+    claude:
+      command: claude
+      extra_args: []
+  reviewer:
+    ccs_profile: codex
+    claude_role: reviewer
+    ccs:
+      command: ccs
+      engine: codex
+      model: codex
+      extra_args: []
+    claude:
+      command: claude
+      extra_args: []
+modes:
+  init:
+    roles:
+    - planner
+  feature:
+    roles:
+    - planner
+    - implementer
+  qa:
+    roles:
+    - qa_planner
+    - implementer
+  review:
+    roles:
+    - reviewer
+  plan:
+    roles:
+    - planner
+fallback:
+  when_runner_missing: claude
+  log_on_forced_fallback: true

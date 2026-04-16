@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "preToolUse": [
+      "scripts/hooks/dangerous-cmd-guard.sh"
+    ],
+    "postToolUse": [],
+    "userPromptSubmit": [
+      "scripts/hooks/tdd-guard.sh"
+    ],
+    "stop": [
+      "scripts/hooks/circuit-breaker.sh"
+    ]
+  }
+}
