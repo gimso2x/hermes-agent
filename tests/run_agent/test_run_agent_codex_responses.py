@@ -977,6 +977,53 @@ def test_run_conversation_codex_continues_after_ack_for_directory_listing_prompt
     assert any(msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1" for msg in result["messages"])
 
 
+def test_run_conversation_codex_continues_after_partial_step_report(monkeypatch):
+    agent = _build_agent(monkeypatch)
+    agent.max_iterations = 6
+    responses = [
+        _codex_tool_call_response(),
+        _codex_message_response(
+            "1단계 성공:\n"
+            "- clone 완료\n\n"
+            "※ recap: 목표는 프로젝트 루트에 so2x-flow를 설치하는 것이었고, 현재 1단계까지 끝났습니다. "
+            "다음으로 install.py를 실행하겠습니다."
+        ),
+        _codex_tool_call_response(),
+        _codex_message_response("모든 설치 단계 완료."),
+    ]
+    monkeypatch.setattr(agent, "_interruptible_api_call", lambda api_kwargs: responses.pop(0))
+
+    def _fake_execute_tool_calls(assistant_message, messages, effective_task_id, *_, **__):
+        for idx, call in enumerate(assistant_message.tool_calls, start=1):
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": f"{call.id}_{idx}",
+                    "content": '{"ok":true}',
+                }
+            )
+
+    monkeypatch.setattr(agent, "_execute_tool_calls", _fake_execute_tool_calls)
+
+    result = agent.run_conversation(
+        "1. clone 해줘\n2. install.py 실행해줘\n3. 파일 확인해줘\n4. 정리해줘"
+    )
+
+    assert result["completed"] is True
+    assert result["final_response"] == "모든 설치 단계 완료."
+    assert any(
+        msg.get("role") == "assistant"
+        and msg.get("finish_reason") == "incomplete"
+        and "1단계 성공" in (msg.get("content") or "")
+        for msg in result["messages"]
+    )
+    assert any(
+        msg.get("role") == "user"
+        and "Continue now. Execute the required tool calls" in (msg.get("content") or "")
+        for msg in result["messages"]
+    )
+
+
 def test_dump_api_request_debug_uses_responses_url(monkeypatch, tmp_path):
     """Debug dumps should show /responses URL when in codex_responses mode."""
     import json

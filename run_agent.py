@@ -1966,20 +1966,18 @@ class AIAgent:
         messages: List[Dict[str, Any]],
     ) -> bool:
         """Detect a planning/ack message that should continue instead of ending the turn."""
-        if any(isinstance(msg, dict) and msg.get("role") == "tool" for msg in messages):
-            return False
-
         assistant_text = self._strip_think_blocks(assistant_content or "").strip().lower()
         if not assistant_text:
             return False
         if len(assistant_text) > 1200:
             return False
 
+        has_tool_results = any(
+            isinstance(msg, dict) and msg.get("role") == "tool" for msg in messages
+        )
         has_future_ack = bool(
             re.search(r"\b(i['’]ll|i will|let me|i can do that|i can help with that)\b", assistant_text)
         )
-        if not has_future_ack:
-            return False
 
         action_markers = (
             "look into",
@@ -2001,6 +1999,13 @@ class AIAgent:
             "walkthrough",
             "report back",
             "summarize",
+            "실행",
+            "확인",
+            "검증",
+            "설치",
+            "정리",
+            "초기화",
+            "보고",
         )
         workspace_markers = (
             "directory",
@@ -2028,7 +2033,36 @@ class AIAgent:
         assistant_targets_workspace = any(
             marker in assistant_text for marker in workspace_markers
         )
-        return (user_targets_workspace or assistant_targets_workspace) and assistant_mentions_action
+        if not has_tool_results:
+            return has_future_ack and (user_targets_workspace or assistant_targets_workspace) and assistant_mentions_action
+
+        user_has_numbered_steps = bool(
+            re.search(r"(?:^|\n)\s*(?:\d+[.)]|[1-9]\s*단계)", user_text)
+        )
+        assistant_reports_partial_step = bool(
+            re.search(r"(?:^|\n)\s*(?:step\s*\d+/?\d*|\d+\s*단계)", assistant_text)
+            or re.search(r"(?:^|\n)\s*[-*]\s*(?:성공|완료|success|done)\b", assistant_text)
+        )
+        future_progress_markers = (
+            "next i",
+            "now i",
+            "then i",
+            "다음",
+            "이제",
+            "바로",
+            "이어",
+            "continue",
+        )
+        mentions_future_progress = any(marker in assistant_text for marker in future_progress_markers)
+        recap_only_markers = ("recap:", "※ recap:", "summary:")
+        assistant_is_recap_style = any(marker in assistant_text for marker in recap_only_markers)
+
+        return (
+            user_has_numbered_steps
+            and assistant_reports_partial_step
+            and assistant_mentions_action
+            and (mentions_future_progress or assistant_is_recap_style or has_future_ack)
+        )
     
     
     def _extract_reasoning(self, assistant_message) -> Optional[str]:
