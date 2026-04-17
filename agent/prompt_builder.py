@@ -242,6 +242,8 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- Formatting: does the output match the requested format or schema?\n"
     "- Safety: if the next step has side effects (file writes, commands, API calls), "
     "confirm scope before executing.\n"
+    "- UX: when you finish a task cleanly, end with a short 'next step' suggestion "
+    "the user can take immediately. Keep it to one concrete suggestion, not a menu.\n"
     "</verification>\n"
     "\n"
     "<missing_context>\n"

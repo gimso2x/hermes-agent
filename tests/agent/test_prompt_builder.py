@@ -1012,6 +1012,8 @@ class TestOpenAIModelExecutionGuidance:
         text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
         assert "verification" in text or "verify" in text
         assert "correctness" in text
+        assert "next step" in text
+        assert "one concrete suggestion" in text
 
     def test_guidance_covers_missing_context(self):
         text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
