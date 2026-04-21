@@ -23,6 +23,7 @@ from tools.skills_hub import (
     create_source_router,
     unified_search,
     append_audit_log,
+    _derive_repo_quality_signals,
     _skill_meta_to_dict,
     quarantine_bundle,
 )
@@ -211,6 +212,7 @@ class TestSkillsShSource:
             trust_level="community",
             repo="vercel-labs/agent-skills",
             path="vercel-react-best-practices",
+            extra={"quality_signals": {"bundle_style": False}},
         )
         mock_get.return_value = MagicMock(
             status_code=200,
@@ -230,6 +232,7 @@ class TestSkillsShSource:
         assert meta.identifier == "skills-sh/vercel-labs/agent-skills/vercel-react-best-practices"
         assert meta.extra["install_command"].endswith("--skill vercel-react-best-practices")
         assert meta.extra["security_audits"]["socket"] == "Pass"
+        assert meta.extra["quality_signals"]["bundle_style"] is False
         mock_inspect.assert_called_once_with("vercel-labs/agent-skills/vercel-react-best-practices")
 
     @patch.object(GitHubSource, "inspect")
@@ -1083,19 +1086,39 @@ class TestSkillMetaToDict:
             name="test", description="desc", source="github",
             identifier="owner/repo/test", trust_level="trusted",
             repo="owner/repo", path="skills/test", tags=["a", "b"],
+            extra={"quality_signals": {"bundle_style": True}},
         )
         d = _skill_meta_to_dict(meta)
         assert d["name"] == "test"
         assert d["tags"] == ["a", "b"]
+        assert d["extra"]["quality_signals"]["bundle_style"] is True
         # Can reconstruct from dict
         restored = SkillMeta(**d)
         assert restored.name == meta.name
         assert restored.trust_level == meta.trust_level
 
 
-# ---------------------------------------------------------------------------
-# Official skills / binary assets
-# ---------------------------------------------------------------------------
+class TestRepoQualitySignals:
+    def test_detects_bundle_style_repo_paths(self):
+        signals = _derive_repo_quality_signals(
+            [
+                "skills/test/SKILL.md",
+                "skills/test/README.md",
+                "skills/test/docs/setup.md",
+                "skills/test/docs/security.md",
+                "skills/test/package.json",
+                "skills/test/tests/test_skill.py",
+                "skills/test/references/api.md",
+            ]
+        )
+
+        assert signals["install_docs"] is True
+        assert signals["setup_docs"] is True
+        assert signals["security_docs"] is True
+        assert signals["package_metadata"] is True
+        assert signals["tests"] is True
+        assert signals["bundle_files"] is True
+        assert signals["bundle_style"] is True
 
 
 class TestOptionalSkillSourceBinaryAssets:

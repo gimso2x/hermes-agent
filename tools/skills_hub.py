@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -37,6 +38,53 @@ from tools.skills_guard import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_repo_quality_signals(paths: List[str] | None) -> Dict[str, bool]:
+    normalized = {str(path).strip("/") for path in (paths or []) if isinstance(path, str)}
+    lowered = {path.lower() for path in normalized}
+
+    def has_exact(*candidates: str) -> bool:
+        candidate_set = {candidate.lower().strip("/") for candidate in candidates}
+        return any(path in candidate_set or any(path.endswith(f"/{candidate}") for candidate in candidate_set) for path in lowered)
+
+    def has_prefix(prefix: str) -> bool:
+        prefix_lower = prefix.lower().rstrip("/") + "/"
+        return any(path == prefix_lower[:-1] or f"/{prefix_lower}" in f"/{path}" for path in lowered)
+
+    def has_suffix(suffixes: tuple[str, ...]) -> bool:
+        return any(path.endswith(suffixes) for path in lowered)
+
+    install_docs = has_exact("readme.md", "docs/install.md", "docs/installation.md")
+    setup_docs = has_exact("docs/setup.md", "setup.md", "docs/quickstart.md")
+    security_docs = has_exact("security.md", "docs/security.md", "docs/secrets.md")
+    tests = has_prefix("tests") or has_suffix(("_test.py", ".spec.js", ".spec.ts", ".test.js", ".test.ts"))
+    package_metadata = has_exact("package.json", "pyproject.toml", "requirements.txt", "cargo.toml", "go.mod")
+    bundle_files = any(
+        has_prefix(prefix) for prefix in ("references", "templates", "assets", "scripts")
+    )
+
+    signals = {
+        "install_docs": install_docs,
+        "setup_docs": setup_docs,
+        "security_docs": security_docs,
+        "tests": tests,
+        "package_metadata": package_metadata,
+        "bundle_files": bundle_files,
+        "bundle_style": sum(
+            bool(value)
+            for value in (
+                install_docs,
+                setup_docs,
+                security_docs,
+                tests,
+                package_metadata,
+                bundle_files,
+            )
+        )
+        >= 3,
+    }
+    return signals
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +450,34 @@ class GitHubSource(SkillSource):
             raw_tags = fm.get("tags", [])
             tags = raw_tags if isinstance(raw_tags, list) else []
 
+        quality_signal_paths = [skill_md_path]
+        for rel_path in (
+            "README.md",
+            "SECURITY.md",
+            "package.json",
+            "pyproject.toml",
+            "requirements.txt",
+            "Cargo.toml",
+            "go.mod",
+            "docs/install.md",
+            "docs/installation.md",
+            "docs/setup.md",
+            "docs/quickstart.md",
+            "docs/security.md",
+            "docs/secrets.md",
+        ):
+            probe_path = posixpath.join(skill_path, rel_path)
+            if self._fetch_file_content(repo, probe_path) is not None:
+                quality_signal_paths.append(probe_path)
+        for prefix in ("tests", "references", "templates", "assets", "scripts"):
+            listing = self._list_directory(repo, posixpath.join(skill_path, prefix))
+            if listing:
+                quality_signal_paths.extend(
+                    posixpath.join(skill_path, prefix, entry["name"])
+                    for entry in listing
+                    if isinstance(entry, dict) and entry.get("name")
+                )
+
         return SkillMeta(
             name=skill_name,
             description=str(description),
@@ -411,6 +487,7 @@ class GitHubSource(SkillSource):
             repo=repo,
             path=skill_path,
             tags=[str(t) for t in tags],
+            extra={"quality_signals": _derive_repo_quality_signals(quality_signal_paths)},
         )
 
     # -- Internal helpers --

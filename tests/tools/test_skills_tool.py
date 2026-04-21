@@ -9,6 +9,8 @@ import pytest
 
 import tools.skills_tool as skills_tool_module
 from tools.skills_tool import (
+    _build_prerequisite_summary,
+    _derive_quality_signals,
     _get_required_environment_variables,
     _parse_frontmatter,
     _parse_tags,
@@ -18,6 +20,7 @@ from tools.skills_tool import (
     skills_list,
     skill_view,
     MAX_DESCRIPTION_LENGTH,
+    SkillReadinessStatus,
 )
 
 
@@ -110,6 +113,48 @@ class TestParseTags:
 
     def test_filters_empty_items(self):
         assert _parse_tags([None, "", "valid"]) == ["valid"]
+
+
+class TestPrerequisiteAndQualityHelpers:
+    def test_build_prerequisite_summary_for_ready_skill(self):
+        assert (
+            _build_prerequisite_summary(SkillReadinessStatus.AVAILABLE, [])
+            == "Ready to use."
+        )
+
+    def test_build_prerequisite_summary_for_missing_requirements(self):
+        summary = _build_prerequisite_summary(
+            SkillReadinessStatus.SETUP_NEEDED,
+            ["env $TENOR_API_KEY", "file ~/.config/tool/auth.json"],
+            setup_help="Run tool login first.",
+            backend="docker",
+        )
+
+        assert "Setup needed:" in summary
+        assert "env $TENOR_API_KEY" in summary
+        assert "file ~/.config/tool/auth.json" in summary
+        assert "Run tool login first." in summary
+        assert "DOCKER" in summary
+
+    def test_derive_quality_signals_for_bundle_style_skill(self, tmp_path):
+        skill_dir = tmp_path / "bundle-skill"
+        (skill_dir / "docs").mkdir(parents=True)
+        (skill_dir / "tests").mkdir()
+        (skill_dir / "references").mkdir()
+        (skill_dir / "README.md").write_text("readme")
+        (skill_dir / "docs" / "setup.md").write_text("setup")
+        (skill_dir / "docs" / "security.md").write_text("security")
+        (skill_dir / "package.json").write_text("{}")
+
+        signals = _derive_quality_signals(skill_dir)
+
+        assert signals["install_docs"] is True
+        assert signals["setup_docs"] is True
+        assert signals["security_docs"] is True
+        assert signals["tests"] is True
+        assert signals["package_metadata"] is True
+        assert signals["bundle_files"] is True
+        assert signals["bundle_style"] is True
 
 
 class TestRequiredEnvironmentVariablesNormalization:
@@ -302,6 +347,7 @@ class TestSkillView:
         result = json.loads(raw)
         assert result["success"] is True
         assert result["name"] == "my-skill"
+        assert result["prerequisite_summary"] == "Ready to use."
         assert "Step 1" in result["content"]
 
     def test_view_nonexistent_skill(self, tmp_path):
@@ -527,6 +573,7 @@ class TestSkillViewSecureSetupOnLoad:
         assert result["success"] is True
         assert called["value"] is False
         assert "local cli" in result["gateway_setup_hint"].lower()
+        assert result["prerequisite_summary"].startswith("Setup needed:")
         assert result["content"].startswith("---")
 
 
@@ -751,6 +798,7 @@ class TestSkillViewPrerequisites:
         result = json.loads(raw)
         assert result["success"] is True
         assert result["setup_needed"] is True
+        assert result["prerequisite_summary"].startswith("Setup needed:")
         assert result["missing_required_environment_variables"] == ["MISSING_KEY_XYZ"]
         assert result["required_environment_variables"] == [
             {
@@ -771,6 +819,7 @@ class TestSkillViewPrerequisites:
         result = json.loads(raw)
         assert result["success"] is True
         assert result["setup_needed"] is False
+        assert result["prerequisite_summary"] == "Ready to use."
         assert result["missing_required_environment_variables"] == []
 
     def test_remote_backend_treats_persisted_env_as_available(
@@ -793,6 +842,7 @@ class TestSkillViewPrerequisites:
         result = json.loads(raw)
         assert result["success"] is True
         assert result["setup_needed"] is False
+        assert result["prerequisite_summary"] == "Ready to use."
         assert result["missing_required_environment_variables"] == []
         assert result["readiness_status"] == "available"
 
@@ -803,6 +853,7 @@ class TestSkillViewPrerequisites:
         result = json.loads(raw)
         assert result["success"] is True
         assert result["setup_needed"] is False
+        assert result["prerequisite_summary"] == "Ready to use."
         assert result["required_environment_variables"] == []
 
     def test_skill_view_treats_backend_only_env_as_setup_needed(

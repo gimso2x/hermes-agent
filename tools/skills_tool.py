@@ -411,18 +411,110 @@ def _gateway_setup_hint() -> str:
         return f"Secure secret entry is not available. Load this skill in the local CLI to be prompted, or add the key to {display_hermes_home()}/.env manually."
 
 
+def _build_prerequisite_summary(
+    readiness_status: SkillReadinessStatus,
+    missing: List[str],
+    setup_help: str | None = None,
+    backend: str | None = None,
+) -> str:
+    backend_name = (backend or "").strip().lower()
+    if readiness_status == SkillReadinessStatus.UNSUPPORTED:
+        return "Unsupported in this environment."
+    if readiness_status == SkillReadinessStatus.AVAILABLE and not missing:
+        return "Ready to use."
+
+    missing_str = ", ".join(missing) if missing else "required prerequisites"
+    summary = f"Setup needed: {missing_str}."
+    if setup_help:
+        summary = f"{summary} {setup_help}".strip()
+    if backend_name in _REMOTE_ENV_BACKENDS:
+        summary = (
+            f"{summary} Also make them available inside the {backend_name.upper()} environment."
+        )
+    return summary
+
+
 def _build_setup_note(
     readiness_status: SkillReadinessStatus,
     missing: List[str],
     setup_help: str | None = None,
+    backend: str | None = None,
 ) -> str | None:
-    if readiness_status == SkillReadinessStatus.SETUP_NEEDED:
-        missing_str = ", ".join(missing) if missing else "required prerequisites"
-        note = f"Setup needed before using this skill: missing {missing_str}."
-        if setup_help:
-            return f"{note} {setup_help}"
-        return note
-    return None
+    if readiness_status != SkillReadinessStatus.SETUP_NEEDED:
+        return None
+    return _build_prerequisite_summary(
+        readiness_status,
+        missing,
+        setup_help=setup_help,
+        backend=backend,
+    )
+
+
+def _derive_quality_signals(skill_dir: Path | None) -> Dict[str, Any]:
+    if not skill_dir or not skill_dir.exists():
+        return {}
+
+    docs_dir = skill_dir / "docs"
+    manifest_candidates = [
+        skill_dir / "package.json",
+        skill_dir / "pyproject.toml",
+        skill_dir / "requirements.txt",
+        skill_dir / "Cargo.toml",
+        skill_dir / "go.mod",
+    ]
+    test_globs = ["tests", "test_*", "*_test.py", "*.spec.*"]
+
+    tests_present = any((skill_dir / "tests").exists() for _ in [0]) or any(
+        skill_dir.glob(pattern) for pattern in test_globs[1:]
+    )
+    security_docs_present = any(
+        path.exists()
+        for path in [
+            skill_dir / "SECURITY.md",
+            docs_dir / "security.md",
+            docs_dir / "secrets.md",
+        ]
+    )
+    install_docs_present = any(
+        path.exists()
+        for path in [
+            skill_dir / "README.md",
+            docs_dir / "install.md",
+            docs_dir / "installation.md",
+        ]
+    )
+    setup_docs_present = any(
+        path.exists()
+        for path in [
+            docs_dir / "setup.md",
+            skill_dir / "SETUP.md",
+            skill_dir / "docs" / "quickstart.md",
+        ]
+    )
+    package_metadata_present = any(path.exists() for path in manifest_candidates)
+    bundle_files_present = any((skill_dir / name).exists() for name in ("references", "templates", "assets", "scripts"))
+
+    signals = {
+        "install_docs": install_docs_present,
+        "setup_docs": setup_docs_present,
+        "security_docs": security_docs_present,
+        "tests": tests_present,
+        "package_metadata": package_metadata_present,
+        "bundle_files": bundle_files_present,
+        "bundle_style": sum(
+            bool(value)
+            for value in (
+                install_docs_present,
+                setup_docs_present,
+                security_docs_present,
+                tests_present,
+                package_metadata_present,
+                bundle_files_present,
+            )
+        )
+        >= 3,
+    }
+    return signals
 
 
 def check_skills_requirements() -> bool:
@@ -1255,6 +1347,19 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
                     exc_info=True,
                 )
 
+        readiness_status = (
+            SkillReadinessStatus.SETUP_NEEDED if setup_needed else SkillReadinessStatus.AVAILABLE
+        )
+        quality_signals = _derive_quality_signals(skill_dir)
+        setup_help = next((e["help"] for e in required_env_vars if e.get("help")), None)
+        prerequisite_summary = _build_prerequisite_summary(
+            readiness_status,
+            [f"env ${env_name}" for env_name in remaining_missing_required_envs]
+            + [f"file {path}" for path in missing_cred_files],
+            setup_help=setup_help,
+            backend=backend,
+        )
+
         result = {
             "success": True,
             "name": skill_name,
@@ -1275,12 +1380,11 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
             "missing_required_commands": [],
             "setup_needed": setup_needed,
             "setup_skipped": capture_result["setup_skipped"],
-            "readiness_status": SkillReadinessStatus.SETUP_NEEDED.value
-            if setup_needed
-            else SkillReadinessStatus.AVAILABLE.value,
+            "readiness_status": readiness_status.value,
+            "prerequisite_summary": prerequisite_summary,
         }
-
-        setup_help = next((e["help"] for e in required_env_vars if e.get("help")), None)
+        if quality_signals:
+            result["quality_signals"] = quality_signals
         if setup_help:
             result["setup_help"] = setup_help
 
@@ -1297,9 +1401,8 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
                 SkillReadinessStatus.SETUP_NEEDED,
                 missing_items,
                 setup_help,
+                backend=backend,
             )
-            if backend in _REMOTE_ENV_BACKENDS and setup_note:
-                setup_note = f"{setup_note} {backend.upper()}-backed skills need these requirements available inside the remote environment as well."
             if setup_note:
                 result["setup_note"] = setup_note
 
